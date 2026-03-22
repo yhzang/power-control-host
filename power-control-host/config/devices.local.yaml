@@ -1,0 +1,36 @@
+app:
+  name: Reliability Power Host
+  environment: local
+  log_dir: logs
+  export_dir: exports
+  runtime_dir: runtime
+
+devices:
+  - id: odp_01
+    vendor: owon
+    model: ODP3122
+    transport:
+      type: visa
+      resource: TCPIP0::192.168.1.101::INSTR
+      timeout_ms: 3000
+      write_termination: "\n"
+      read_termination: "\n"
+    logical_channels:
+      - CH1
+      - CH2
+    notes: >
+      这里先按 LAN + VISA 方式预填。开始联调前，请把型号、IP、通道名改成现场真实值。
+
+  - id: psw_01
+    vendor: gwinstek
+    model: PSW30-72
+    transport:
+      type: visa
+      resource: TCPIP0::192.168.1.102::INSTR
+      timeout_ms: 3000
+      write_termination: "\n"
+      read_termination: "\n"
+    logical_channels:
+      - OUT
+    notes: >
+      PSW 默认按单输出处理。若现场设备使用 Socket 或 Serial，请把 transport 节点改成对应配置。
