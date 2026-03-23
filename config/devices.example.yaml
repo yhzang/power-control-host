@@ -1,0 +1,37 @@
+app:
+  name: Reliability Power Host
+  environment: dev
+  log_dir: logs
+  export_dir: exports
+  runtime_dir: runtime
+
+devices:
+  - id: odp_01
+    vendor: owon
+    model: ODP3122
+    transport:
+      type: visa
+      resource: TCPIP0::192.168.1.101::INSTR
+      timeout_ms: 3000
+      write_termination: "\n"
+      read_termination: "\n"
+    logical_channels:
+      - CH1
+      - CH2
+    notes: >
+      这里先用 ODP 双路机型示例，最终以现场铭牌和编程手册核对结果为准。
+
+  - id: psw_01
+    vendor: gwinstek
+    model: PSW30-72
+    transport:
+      type: visa
+      resource: TCPIP0::192.168.1.102::INSTR
+      timeout_ms: 3000
+      write_termination: "\n"
+      read_termination: "\n"
+    logical_channels:
+      - OUT
+    notes: >
+      PSW 资源地址先按常见 VISA/TCPIP 形式示例，后续以现场设备接口和识别结果为准。
+
