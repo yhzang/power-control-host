@@ -38,9 +38,14 @@ python -m power_control_host show-plan
 python -m power_control_host check-config --config .\config\devices.local.yaml
 ```
 
+如果你现在还没装 Python、虚拟环境和 NI-VISA，先看：
+`docs/09-environment-setup.md`
+
 ## PoC 常用命令
 
 ```powershell
+python -m power_control_host list-visa-resources
+python -m power_control_host probe-visa --resource "USB0::..."
 python -m power_control_host probe-idn --config .\config\devices.local.yaml --device odp_01
 python -m power_control_host probe-idn --config .\config\devices.local.yaml --device psw_01
 python -m power_control_host set-voltage --config .\config\devices.local.yaml --device odp_01 --channel CH1 --value 12
@@ -52,6 +57,8 @@ python -m power_control_host output-off --config .\config\devices.local.yaml --d
 
 详细步骤见 `docs/06-local-setup-and-poc.md`。
 如需按顺序执行的正式说明，可直接看 `docs/07-operation-manual.md`。
+如需先做 USB 第一次通信验证，可直接看 `docs/08-usb-first-contact.md`。
+如需详细环境安装步骤，可直接看 `docs/09-environment-setup.md`。
 
 ## 第一阶段完成标准
 

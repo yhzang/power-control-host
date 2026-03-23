@@ -4,6 +4,10 @@ import argparse
 from pathlib import Path
 
 from power_control_host.app import create_app
+from power_control_host.transports.visa_transport import (
+    list_visa_resources,
+    probe_visa_resource,
+)
 
 
 def main() -> int:
@@ -18,6 +22,30 @@ def main() -> int:
     subparsers.add_parser("show-plan", help="Show the stage-1 checklist.")
     subparsers.add_parser("check-config", help="Validate config and print a summary.")
     subparsers.add_parser("show-devices", help="Print configured devices.")
+    subparsers.add_parser(
+        "list-visa-resources",
+        help="List VISA resources currently visible on this computer.",
+    )
+    probe_visa_parser = subparsers.add_parser(
+        "probe-visa",
+        help="Send *IDN? or a custom command to a raw VISA resource without YAML config.",
+    )
+    probe_visa_parser.add_argument(
+        "--resource",
+        required=True,
+        help="Exact VISA resource string, for example USB0::...::INSTR",
+    )
+    probe_visa_parser.add_argument(
+        "--scpi",
+        default="*IDN?",
+        help="SCPI command to send. Defaults to *IDN?",
+    )
+    probe_visa_parser.add_argument(
+        "--timeout-ms",
+        type=int,
+        default=3000,
+        help="Timeout in milliseconds.",
+    )
     probe_parser = subparsers.add_parser("probe-idn", help="Query *IDN? from one device.")
     probe_parser.add_argument("--device", required=True, help="Configured device id.")
 
@@ -48,6 +76,27 @@ def main() -> int:
 
     if args.command == "show-plan":
         print_stage_1_plan()
+        return 0
+
+    if args.command == "list-visa-resources":
+        resources = list_visa_resources()
+        if not resources:
+            print("没有发现 VISA 资源。请先检查设备、驱动和 NI-VISA。")
+            return 0
+        print("当前可见 VISA 资源:")
+        for item in resources:
+            print(f"- {item}")
+        return 0
+
+    if args.command == "probe-visa":
+        response = probe_visa_resource(
+            resource=args.resource,
+            command=args.scpi,
+            timeout_ms=args.timeout_ms,
+        )
+        print(f"resource: {args.resource}")
+        print(f"command: {args.scpi}")
+        print(f"response: {response}")
         return 0
 
     app = create_app(config_path)
@@ -100,17 +149,18 @@ def print_stage_1_plan() -> None:
         "",
         "建议顺序：",
         "1. 确认 ODP / PSW 现场型号、固件、接口照片",
-        "2. 优先搭 LAN，准备交换机和网线",
-        "3. 安装 Python、NI-VISA、厂家软件",
-        "4. 复制并填写 devices.local.yaml",
-        "5. 先跑配置检查",
-        "6. 再写 *IDN?、设压、设流、开关输出验证",
+        "2. 安装 Python、NI-VISA、厂家软件",
+        "3. 先用 USB 接 1 台设备，执行 list-visa-resources",
+        "4. 再用 probe-visa 发送 *IDN?，先确认 VISA 通不通",
+        "5. 通了以后再填写 devices.local.yaml",
+        "6. 再做设压、设流、开关输出验证",
+        "7. 最后再尝试 LAN 和多设备扩展",
         "",
         "第一批代码重点：",
         "- 配置加载",
         "- 传输层选择",
         "- ODP / PSW 设备对象",
-        "- 最小通信验证脚本",
+        "- 最小通信验证入口",
     ]
     print("\n".join(lines))
 
