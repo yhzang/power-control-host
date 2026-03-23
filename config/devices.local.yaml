@@ -37,6 +37,6 @@ devices:
     logical_channels:
       - OUT
     notes: >
-      PSW 默认按单输出处理。若你现在先用 USB 验证，
+      PSW 默认按单输出处理。若现在先用 USB 验证，
       请把 resource 整行替换成 list-visa-resources 列出来并且 probe-visa 成功的完整资源字符串。
       若现场设备使用 Socket 或 Serial，请把 transport 节点改成对应配置。
