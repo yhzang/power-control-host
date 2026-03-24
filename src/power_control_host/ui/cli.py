@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime
 from pathlib import Path
 
 from power_control_host.app import create_app
@@ -18,7 +19,7 @@ from power_control_host.transports.visa_transport import (
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Reliability power host skeleton")
+    parser = argparse.ArgumentParser(description="Reliability power host")
     parser.add_argument(
         "--config",
         default="config/devices.local.yaml",
@@ -26,7 +27,7 @@ def main() -> int:
     )
 
     subparsers = parser.add_subparsers(dest="command", required=True)
-    subparsers.add_parser("show-plan", help="Show the current checklist.")
+    subparsers.add_parser("show-plan", help="Show the current development checklist.")
     subparsers.add_parser("check-config", help="Validate config and print a summary.")
     subparsers.add_parser("show-devices", help="Print configured devices.")
     subparsers.add_parser(
@@ -38,22 +39,9 @@ def main() -> int:
         "probe-visa",
         help="Send *IDN? or a custom command to a raw VISA resource without YAML config.",
     )
-    probe_visa_parser.add_argument(
-        "--resource",
-        required=True,
-        help="Exact VISA resource string, for example USB0::...::INSTR",
-    )
-    probe_visa_parser.add_argument(
-        "--scpi",
-        default="*IDN?",
-        help="SCPI command to send. Defaults to *IDN?",
-    )
-    probe_visa_parser.add_argument(
-        "--timeout-ms",
-        type=int,
-        default=3000,
-        help="Timeout in milliseconds.",
-    )
+    probe_visa_parser.add_argument("--resource", required=True, help="Exact VISA resource string.")
+    probe_visa_parser.add_argument("--scpi", default="*IDN?", help="SCPI command to send.")
+    probe_visa_parser.add_argument("--timeout-ms", type=int, default=3000, help="Timeout in milliseconds.")
 
     socket_parser = subparsers.add_parser(
         "socket-scpi",
@@ -62,12 +50,7 @@ def main() -> int:
     socket_parser.add_argument("--host", required=True, help="Socket host or device IP.")
     socket_parser.add_argument("--port", required=True, type=int, help="Socket port.")
     socket_parser.add_argument("--scpi", required=True, help="SCPI command to send.")
-    socket_parser.add_argument(
-        "--timeout-ms",
-        type=int,
-        default=3000,
-        help="Timeout in milliseconds.",
-    )
+    socket_parser.add_argument("--timeout-ms", type=int, default=3000, help="Timeout in milliseconds.")
     socket_parser.add_argument(
         "--write-only",
         action="store_true",
@@ -81,37 +64,12 @@ def main() -> int:
     odp_smoke_parser.add_argument("--host", required=True, help="ODP IP address.")
     odp_smoke_parser.add_argument("--port", required=True, type=int, help="ODP socket port.")
     odp_smoke_parser.add_argument("--channel", default="CH1", help="ODP logical channel.")
-    odp_smoke_parser.add_argument(
-        "--timeout-ms",
-        type=int,
-        default=3000,
-        help="Timeout in milliseconds.",
-    )
-    odp_smoke_parser.add_argument(
-        "--voltage",
-        type=float,
-        help="If provided, send the voltage set command.",
-    )
-    odp_smoke_parser.add_argument(
-        "--current",
-        type=float,
-        help="If provided, send the current set command.",
-    )
-    odp_smoke_parser.add_argument(
-        "--output-on",
-        action="store_true",
-        help="Turn output on after optional setpoint commands.",
-    )
-    odp_smoke_parser.add_argument(
-        "--measure",
-        action="store_true",
-        help="Query measurement after optional setpoint/output commands.",
-    )
-    odp_smoke_parser.add_argument(
-        "--output-off",
-        action="store_true",
-        help="Turn output off at the end.",
-    )
+    odp_smoke_parser.add_argument("--timeout-ms", type=int, default=3000, help="Timeout in milliseconds.")
+    odp_smoke_parser.add_argument("--voltage", type=float, help="Optional voltage setpoint.")
+    odp_smoke_parser.add_argument("--current", type=float, help="Optional current setpoint.")
+    odp_smoke_parser.add_argument("--output-on", action="store_true", help="Turn output on.")
+    odp_smoke_parser.add_argument("--measure", action="store_true", help="Read measurement.")
+    odp_smoke_parser.add_argument("--output-off", action="store_true", help="Turn output off at the end.")
 
     probe_parser = subparsers.add_parser("probe-idn", help="Query *IDN? from one configured device.")
     probe_parser.add_argument("--device", required=True, help="Configured device id.")
@@ -138,18 +96,64 @@ def main() -> int:
     output_off_parser.add_argument("--device", required=True, help="Configured device id.")
     output_off_parser.add_argument("--channel", help="Logical channel name. Defaults to first configured channel.")
 
+    cycle_parser = subparsers.add_parser(
+        "run-cycle",
+        help="Run a single-channel on/off cycle on one configured device.",
+    )
+    cycle_parser.add_argument("--device", required=True, help="Configured device id.")
+    cycle_parser.add_argument("--channel", required=True, help="Logical channel name, for example CH1.")
+    cycle_parser.add_argument("--on-seconds", required=True, type=float, help="Output-on duration in seconds.")
+    cycle_parser.add_argument("--off-seconds", required=True, type=float, help="Output-off duration in seconds.")
+    cycle_parser.add_argument("--cycles", required=True, type=int, help="Cycle count.")
+    cycle_parser.add_argument("--voltage", type=float, help="Optional preset voltage before running.")
+    cycle_parser.add_argument("--current", type=float, help="Optional preset current before running.")
+    cycle_parser.add_argument(
+        "--log-file",
+        help="Optional CSV log path. Defaults to runtime/sequence_logs/<timestamp>.csv",
+    )
+
+    staggered_parser = subparsers.add_parser(
+        "run-staggered-cycle",
+        help="Run a two-channel delayed cycle with later-on-earlier-off behavior.",
+    )
+    staggered_parser.add_argument("--device", required=True, help="Configured device id.")
+    staggered_parser.add_argument("--lead-channel", required=True, help="First channel to turn on.")
+    staggered_parser.add_argument("--lag-channel", required=True, help="Second channel to turn on after delay.")
+    staggered_parser.add_argument("--delay-seconds", required=True, type=float, help="Delay between channels.")
+    staggered_parser.add_argument(
+        "--hold-seconds",
+        required=True,
+        type=float,
+        help="Duration to keep both channels on before the lag channel turns off.",
+    )
+    staggered_parser.add_argument(
+        "--rest-seconds",
+        type=float,
+        default=0.0,
+        help="Rest duration after both channels turn off.",
+    )
+    staggered_parser.add_argument("--cycles", required=True, type=int, help="Cycle count.")
+    staggered_parser.add_argument("--lead-voltage", type=float, help="Optional preset voltage for lead channel.")
+    staggered_parser.add_argument("--lead-current", type=float, help="Optional preset current for lead channel.")
+    staggered_parser.add_argument("--lag-voltage", type=float, help="Optional preset voltage for lag channel.")
+    staggered_parser.add_argument("--lag-current", type=float, help="Optional preset current for lag channel.")
+    staggered_parser.add_argument(
+        "--log-file",
+        help="Optional CSV log path. Defaults to runtime/sequence_logs/<timestamp>.csv",
+    )
+
     args = parser.parse_args()
 
     if args.command == "show-plan":
-        print_stage_1_plan()
+        print_stage_plan()
         return 0
 
     if args.command == "list-visa-resources":
         resources = list_visa_resources()
         if not resources:
-            print("没有发现 VISA 资源。请先检查设备、驱动和 NI-VISA。")
+            print("No VISA resources found.")
             return 0
-        print("当前可见 VISA 资源:")
+        print("Visible VISA resources:")
         for item in resources:
             print(f"- {item}")
         return 0
@@ -186,8 +190,7 @@ def main() -> int:
         run_odp_socket_smoke(args)
         return 0
 
-    config_path = Path(args.config)
-    app = create_app(config_path)
+    app = create_app(Path(args.config))
 
     if args.command == "check-config":
         print_config_summary(app)
@@ -210,59 +213,86 @@ def main() -> int:
 
     if args.command == "set-voltage":
         channel = app.device_service.set_voltage(args.device, args.channel, args.value)
-        print(f"已下发设压命令: device={args.device}, channel={channel}, voltage={args.value}")
+        print(f"set_voltage: device={args.device}, channel={channel}, voltage={args.value}")
         return 0
 
     if args.command == "set-current":
         channel = app.device_service.set_current(args.device, args.channel, args.value)
-        print(f"已下发设流命令: device={args.device}, channel={channel}, current={args.value}")
+        print(f"set_current: device={args.device}, channel={channel}, current={args.value}")
         return 0
 
     if args.command == "output-on":
         channel = app.device_service.output_on(args.device, args.channel)
-        print(f"已下发开输出命令: device={args.device}, channel={channel}")
+        print(f"output_on: device={args.device}, channel={channel}")
         return 0
 
     if args.command == "output-off":
         channel = app.device_service.output_off(args.device, args.channel)
-        print(f"已下发关输出命令: device={args.device}, channel={channel}")
+        print(f"output_off: device={args.device}, channel={channel}")
+        return 0
+
+    if args.command == "run-cycle":
+        plan = app.sequence_service.build_single_channel_cycle_plan(
+            device_id=args.device,
+            channel=args.channel,
+            on_seconds=args.on_seconds,
+            off_seconds=args.off_seconds,
+            cycles=args.cycles,
+            voltage=args.voltage,
+            current=args.current,
+        )
+        log_path = resolve_sequence_log_path(args.log_file, plan.name)
+        events = app.sequence_service.execute_plan(plan, log_path=log_path)
+        print_sequence_summary(plan.name, events, log_path)
+        return 0
+
+    if args.command == "run-staggered-cycle":
+        plan = app.sequence_service.build_staggered_channel_cycle_plan(
+            device_id=args.device,
+            lead_channel=args.lead_channel,
+            lag_channel=args.lag_channel,
+            delay_seconds=args.delay_seconds,
+            hold_seconds=args.hold_seconds,
+            rest_seconds=args.rest_seconds,
+            cycles=args.cycles,
+            lead_voltage=args.lead_voltage,
+            lead_current=args.lead_current,
+            lag_voltage=args.lag_voltage,
+            lag_current=args.lag_current,
+        )
+        log_path = resolve_sequence_log_path(args.log_file, plan.name)
+        events = app.sequence_service.execute_plan(plan, log_path=log_path)
+        print_sequence_summary(plan.name, events, log_path)
         return 0
 
     return 0
 
 
-def print_stage_1_plan() -> None:
+def print_stage_plan() -> None:
     lines = [
-        "当前第一阶段目标：先把 ODP 单机 socket 链路跑稳，不急着做 GUI 和多设备。",
+        "Current target: finish one ODP first, then expand.",
         "",
-        "建议顺序：",
-        "1. 固定 ODP 的型号、IP、端口、通道名",
-        "2. 用 socket-scpi 跑通 *IDN?",
-        "3. 逐条验证 INST / VOLT / CURR / OUTP / MEAS",
-        "4. 用 odp-socket-smoke 再走一遍高层命令链",
-        "5. 确认 ODP 驱动里的命令格式",
-        "6. ODP 稳定后再补回 PSW",
-        "7. 最后再进入 40 台设备的调度和采样设计",
-        "",
-        "当前代码重点：",
-        "- ODP socket 原始命令入口",
-        "- ODP 高层驱动命令校正",
-        "- 配置大小写兼容",
-        "- 多设备扩展预留",
+        "Suggested order:",
+        "1. Lock down ODP socket commands and parsing.",
+        "2. Verify single-channel cycle.",
+        "3. Verify two-channel staggered cycle on one ODP.",
+        "4. Add runtime event logs.",
+        "5. Add PSW after ODP behavior is stable.",
+        "6. Then add multi-device sampling, export, and timing control.",
     ]
     print("\n".join(lines))
 
 
 def print_config_summary(app) -> None:
     settings = app.settings
-    print(f"应用名称: {settings.name}")
-    print(f"运行环境: {settings.environment}")
-    print(f"项目根目录: {settings.base_dir}")
-    print(f"日志目录: {settings.directories.log_dir}")
-    print(f"导出目录: {settings.directories.export_dir}")
-    print(f"运行目录: {settings.directories.runtime_dir}")
+    print(f"app_name: {settings.name}")
+    print(f"environment: {settings.environment}")
+    print(f"base_dir: {settings.base_dir}")
+    print(f"log_dir: {settings.directories.log_dir}")
+    print(f"export_dir: {settings.directories.export_dir}")
+    print(f"runtime_dir: {settings.directories.runtime_dir}")
     print("")
-    print("设备清单:")
+    print("devices:")
     for device in settings.devices:
         print(
             f"- {device.id} | vendor={device.vendor} | model={device.model} "
@@ -277,6 +307,22 @@ def print_measurement(sample) -> None:
     print(f"current: {sample.current}")
     if sample.raw:
         print(f"raw: {sample.raw}")
+
+
+def print_sequence_summary(plan_name: str, events, log_path: str) -> None:
+    print(f"plan_name: {plan_name}")
+    print(f"step_count: {len(events)}")
+    print(f"log_file: {log_path}")
+    print("last_events:")
+    for event in events[-5:]:
+        print(f"- {event.timestamp} | {event.channel} | {event.action} | {event.detail}")
+
+
+def resolve_sequence_log_path(log_path: str | None, plan_name: str) -> str:
+    if log_path:
+        return log_path
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    return f"sequence_logs/{plan_name}_{timestamp}.csv"
 
 
 def run_odp_socket_smoke(args) -> None:

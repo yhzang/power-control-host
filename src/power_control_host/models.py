@@ -42,3 +42,14 @@ class SequencePlan:
     name: str
     steps: list[SequenceStep]
 
+
+@dataclass(slots=True)
+class SequenceExecutionEvent:
+    timestamp: str
+    plan_name: str
+    step_index: int
+    device_id: str
+    channel: str
+    action: str
+    detail: str = ""
+

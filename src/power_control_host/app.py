@@ -20,10 +20,11 @@ def create_app(config_path: str | Path) -> ApplicationContext:
     settings = load_settings(config_path)
     configure_logging(settings.directories.log_dir)
     _ensure_directories(settings)
+    device_service = DeviceService(settings)
     return ApplicationContext(
         settings=settings,
-        device_service=DeviceService(settings),
-        sequence_service=SequenceService(),
+        device_service=device_service,
+        sequence_service=SequenceService(device_service, settings.directories.runtime_dir),
     )
 
 
