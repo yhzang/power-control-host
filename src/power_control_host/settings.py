@@ -91,11 +91,11 @@ def load_settings(config_path: str | Path) -> AppSettings:
 def _build_device_config(payload: dict[str, Any]) -> DeviceConfig:
     transport_payload = payload.get("transport", {})
     transport = TransportConfig(
-        type=TransportType(transport_payload["type"]),
-        resource=transport_payload.get("resource"),
-        host=transport_payload.get("host"),
-        port=transport_payload.get("port"),
-        serial_port=transport_payload.get("serial_port"),
+        type=_parse_transport_type(transport_payload["type"]),
+        resource=_clean_optional_text(transport_payload.get("resource")),
+        host=_clean_optional_text(transport_payload.get("host")),
+        port=_parse_optional_int(transport_payload.get("port")),
+        serial_port=_clean_optional_text(transport_payload.get("serial_port")),
         baudrate=int(transport_payload.get("baudrate", 9600)),
         timeout_ms=int(transport_payload.get("timeout_ms", 3000)),
         write_termination=str(transport_payload.get("write_termination", "\n")),
@@ -104,10 +104,67 @@ def _build_device_config(payload: dict[str, Any]) -> DeviceConfig:
 
     return DeviceConfig(
         id=str(payload["id"]),
-        vendor=DeviceVendor(payload.get("vendor", "unknown")),
+        vendor=_parse_device_vendor(payload.get("vendor", "unknown")),
         model=str(payload["model"]),
         transport=transport,
-        logical_channels=list(payload.get("logical_channels", [])),
+        logical_channels=[
+            str(item).strip()
+            for item in payload.get("logical_channels", [])
+            if str(item).strip()
+        ],
         notes=str(payload.get("notes", "")),
     )
+
+
+def _parse_device_vendor(raw: Any) -> DeviceVendor:
+    normalized = _normalize_token(raw)
+    mapping = {
+        "owon": DeviceVendor.OWON,
+        "gwinstek": DeviceVendor.GWINSTEK,
+        "gwinstekpower": DeviceVendor.GWINSTEK,
+        "unknown": DeviceVendor.UNKNOWN,
+    }
+    if normalized in mapping:
+        return mapping[normalized]
+    raise ValueError(
+        f"未知设备厂商: {raw!r}。当前支持: owon, gwinstek, unknown。"
+    )
+
+
+def _parse_transport_type(raw: Any) -> TransportType:
+    normalized = _normalize_token(raw)
+    mapping = {
+        "visa": TransportType.VISA,
+        "socket": TransportType.SOCKET,
+        "serial": TransportType.SERIAL,
+    }
+    if normalized in mapping:
+        return mapping[normalized]
+    raise ValueError(
+        f"未知传输类型: {raw!r}。当前支持: visa, socket, serial。"
+    )
+
+
+def _normalize_token(value: Any) -> str:
+    return (
+        str(value)
+        .strip()
+        .lower()
+        .replace(" ", "")
+        .replace("-", "")
+        .replace("_", "")
+    )
+
+
+def _clean_optional_text(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _parse_optional_int(value: Any) -> int | None:
+    if value is None:
+        return None
+    return int(value)
 

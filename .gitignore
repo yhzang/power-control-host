@@ -13,3 +13,4 @@ runtime/
 *.pyc
 *.pyo
 *.pyd
+.ipynb_checkpoints/
