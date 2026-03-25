@@ -16,6 +16,10 @@ from power_control_host.transports.visa_transport import (
     list_visa_resources,
     probe_visa_resource,
 )
+from power_control_host.ui.cli_parsing import (
+    parse_parallel_channel_specs,
+    parse_relative_channel_specs,
+)
 
 
 def main() -> int:
@@ -112,6 +116,49 @@ def main() -> int:
         help="Optional CSV log path. Defaults to runtime/sequence_logs/<timestamp>.csv",
     )
 
+    parallel_parser = subparsers.add_parser(
+        "run-parallel-cycle",
+        help="Run multiple channels from a shared start time, each with its own cycle settings.",
+    )
+    parallel_parser.add_argument("--device", required=True, help="Configured device id.")
+    parallel_parser.add_argument(
+        "--channel-spec",
+        dest="channel_specs",
+        action="append",
+        required=True,
+        help=(
+            "Channel spec in the form CH1:on=10,off=5,cycles=3,voltage=12,current=1. "
+            "Repeat this option for each channel."
+        ),
+    )
+    parallel_parser.add_argument(
+        "--log-file",
+        help="Optional CSV log path. Defaults to runtime/sequence_logs/<timestamp>.csv",
+    )
+
+    relative_parser = subparsers.add_parser(
+        "run-relative-cycle",
+        help="Run multi-channel relative timing with shared group cycle settings.",
+    )
+    relative_parser.add_argument("--device", required=True, help="Configured device id.")
+    relative_parser.add_argument("--on-seconds", required=True, type=float, help="Group on duration.")
+    relative_parser.add_argument("--off-seconds", required=True, type=float, help="Group off duration.")
+    relative_parser.add_argument("--cycles", required=True, type=int, help="Group cycle count.")
+    relative_parser.add_argument(
+        "--channel-spec",
+        dest="channel_specs",
+        action="append",
+        required=True,
+        help=(
+            "Channel spec in the form CH2:ref=CH1,on_delay=5,off_advance=5,voltage=50,current=2. "
+            "Repeat this option for each channel."
+        ),
+    )
+    relative_parser.add_argument(
+        "--log-file",
+        help="Optional CSV log path. Defaults to runtime/sequence_logs/<timestamp>.csv",
+    )
+
     staggered_parser = subparsers.add_parser(
         "run-staggered-cycle",
         help="Run a two-channel delayed cycle with later-on-earlier-off behavior.",
@@ -144,128 +191,142 @@ def main() -> int:
 
     args = parser.parse_args()
 
-    if args.command == "show-plan":
-        print_stage_plan()
-        return 0
-
-    if args.command == "list-visa-resources":
-        resources = list_visa_resources()
-        if not resources:
-            print("No VISA resources found.")
+    try:
+        if args.command == "show-plan":
+            print_stage_plan()
             return 0
-        print("Visible VISA resources:")
-        for item in resources:
-            print(f"- {item}")
-        return 0
 
-    if args.command == "probe-visa":
-        response = probe_visa_resource(
-            resource=args.resource,
-            command=args.scpi,
-            timeout_ms=args.timeout_ms,
-        )
-        print(f"resource: {args.resource}")
-        print(f"command: {args.scpi}")
-        print(f"response: {response}")
-        return 0
+        if args.command == "list-visa-resources":
+            resources = list_visa_resources()
+            if not resources:
+                print("No VISA resources found.")
+                return 0
+            print("Visible VISA resources:")
+            for item in resources:
+                print(f"- {item}")
+            return 0
 
-    if args.command == "socket-scpi":
-        response = run_socket_command(
-            host=args.host,
-            port=args.port,
-            command=args.scpi,
-            timeout_ms=args.timeout_ms,
-            expect_response=not args.write_only,
-        )
-        print(f"host: {args.host}")
-        print(f"port: {args.port}")
-        print(f"command: {args.scpi}")
-        if args.write_only:
-            print("result: sent")
-        else:
+        if args.command == "probe-visa":
+            response = probe_visa_resource(
+                resource=args.resource,
+                command=args.scpi,
+                timeout_ms=args.timeout_ms,
+            )
+            print(f"resource: {args.resource}")
+            print(f"command: {args.scpi}")
             print(f"response: {response}")
+            return 0
+
+        if args.command == "socket-scpi":
+            response = run_socket_command(
+                host=args.host,
+                port=args.port,
+                command=args.scpi,
+                timeout_ms=args.timeout_ms,
+                expect_response=not args.write_only,
+            )
+            print(f"host: {args.host}")
+            print(f"port: {args.port}")
+            print(f"command: {args.scpi}")
+            if args.write_only:
+                print("result: sent")
+            else:
+                print(f"response: {response}")
+            return 0
+
+        if args.command == "odp-socket-smoke":
+            run_odp_socket_smoke(args)
+            return 0
+
+        app = create_app(Path(args.config))
+
+        if args.command == "check-config":
+            print_config_summary(app)
+            return 0
+
+        if args.command == "show-devices":
+            for item in app.device_service.list_devices():
+                print(item)
+            return 0
+
+        if args.command == "probe-idn":
+            identity = app.device_service.identify(args.device)
+            print(f"{identity.device_id} ({identity.model}) -> {identity.identity}")
+            return 0
+
+        if args.command == "measure":
+            sample = app.device_service.read_measurement(args.device, args.channel)
+            print_measurement(sample)
+            return 0
+
+        if args.command == "set-voltage":
+            channel = app.device_service.set_voltage(args.device, args.channel, args.value)
+            print(f"set_voltage: device={args.device}, channel={channel}, voltage={args.value}")
+            return 0
+
+        if args.command == "set-current":
+            channel = app.device_service.set_current(args.device, args.channel, args.value)
+            print(f"set_current: device={args.device}, channel={channel}, current={args.value}")
+            return 0
+
+        if args.command == "output-on":
+            channel = app.device_service.output_on(args.device, args.channel)
+            print(f"output_on: device={args.device}, channel={channel}")
+            return 0
+
+        if args.command == "output-off":
+            channel = app.device_service.output_off(args.device, args.channel)
+            print(f"output_off: device={args.device}, channel={channel}")
+            return 0
+
+        if args.command == "run-cycle":
+            plan = app.sequence_service.build_single_channel_cycle_plan(
+                device_id=args.device,
+                channel=args.channel,
+                on_seconds=args.on_seconds,
+                off_seconds=args.off_seconds,
+                cycles=args.cycles,
+                voltage=args.voltage,
+                current=args.current,
+            )
+            return _execute_sequence_plan(app, plan, args.log_file)
+
+        if args.command == "run-parallel-cycle":
+            plan = app.sequence_service.build_parallel_channel_cycle_plan(
+                device_id=args.device,
+                channel_specs=parse_parallel_channel_specs(args.channel_specs),
+            )
+            return _execute_sequence_plan(app, plan, args.log_file)
+
+        if args.command == "run-relative-cycle":
+            plan = app.sequence_service.build_relative_channel_cycle_plan(
+                device_id=args.device,
+                on_seconds=args.on_seconds,
+                off_seconds=args.off_seconds,
+                cycles=args.cycles,
+                channel_specs=parse_relative_channel_specs(args.channel_specs),
+            )
+            return _execute_sequence_plan(app, plan, args.log_file)
+
+        if args.command == "run-staggered-cycle":
+            plan = app.sequence_service.build_staggered_channel_cycle_plan(
+                device_id=args.device,
+                lead_channel=args.lead_channel,
+                lag_channel=args.lag_channel,
+                delay_seconds=args.delay_seconds,
+                hold_seconds=args.hold_seconds,
+                rest_seconds=args.rest_seconds,
+                cycles=args.cycles,
+                lead_voltage=args.lead_voltage,
+                lead_current=args.lead_current,
+                lag_voltage=args.lag_voltage,
+                lag_current=args.lag_current,
+            )
+            return _execute_sequence_plan(app, plan, args.log_file)
+
         return 0
-
-    if args.command == "odp-socket-smoke":
-        run_odp_socket_smoke(args)
-        return 0
-
-    app = create_app(Path(args.config))
-
-    if args.command == "check-config":
-        print_config_summary(app)
-        return 0
-
-    if args.command == "show-devices":
-        for item in app.device_service.list_devices():
-            print(item)
-        return 0
-
-    if args.command == "probe-idn":
-        identity = app.device_service.identify(args.device)
-        print(f"{identity.device_id} ({identity.model}) -> {identity.identity}")
-        return 0
-
-    if args.command == "measure":
-        sample = app.device_service.read_measurement(args.device, args.channel)
-        print_measurement(sample)
-        return 0
-
-    if args.command == "set-voltage":
-        channel = app.device_service.set_voltage(args.device, args.channel, args.value)
-        print(f"set_voltage: device={args.device}, channel={channel}, voltage={args.value}")
-        return 0
-
-    if args.command == "set-current":
-        channel = app.device_service.set_current(args.device, args.channel, args.value)
-        print(f"set_current: device={args.device}, channel={channel}, current={args.value}")
-        return 0
-
-    if args.command == "output-on":
-        channel = app.device_service.output_on(args.device, args.channel)
-        print(f"output_on: device={args.device}, channel={channel}")
-        return 0
-
-    if args.command == "output-off":
-        channel = app.device_service.output_off(args.device, args.channel)
-        print(f"output_off: device={args.device}, channel={channel}")
-        return 0
-
-    if args.command == "run-cycle":
-        plan = app.sequence_service.build_single_channel_cycle_plan(
-            device_id=args.device,
-            channel=args.channel,
-            on_seconds=args.on_seconds,
-            off_seconds=args.off_seconds,
-            cycles=args.cycles,
-            voltage=args.voltage,
-            current=args.current,
-        )
-        log_path = resolve_sequence_log_path(args.log_file, plan.name)
-        events = app.sequence_service.execute_plan(plan, log_path=log_path)
-        print_sequence_summary(plan.name, events, log_path)
-        return 0
-
-    if args.command == "run-staggered-cycle":
-        plan = app.sequence_service.build_staggered_channel_cycle_plan(
-            device_id=args.device,
-            lead_channel=args.lead_channel,
-            lag_channel=args.lag_channel,
-            delay_seconds=args.delay_seconds,
-            hold_seconds=args.hold_seconds,
-            rest_seconds=args.rest_seconds,
-            cycles=args.cycles,
-            lead_voltage=args.lead_voltage,
-            lead_current=args.lead_current,
-            lag_voltage=args.lag_voltage,
-            lag_current=args.lag_current,
-        )
-        log_path = resolve_sequence_log_path(args.log_file, plan.name)
-        events = app.sequence_service.execute_plan(plan, log_path=log_path)
-        print_sequence_summary(plan.name, events, log_path)
-        return 0
-
-    return 0
+    except ValueError as exc:
+        parser.error(str(exc))
 
 
 def print_stage_plan() -> None:
@@ -323,6 +384,13 @@ def resolve_sequence_log_path(log_path: str | None, plan_name: str) -> str:
         return log_path
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     return f"sequence_logs/{plan_name}_{timestamp}.csv"
+
+
+def _execute_sequence_plan(app, plan, log_file: str | None) -> int:
+    log_path = resolve_sequence_log_path(log_file, plan.name)
+    events = app.sequence_service.execute_plan(plan, log_path=log_path)
+    print_sequence_summary(plan.name, events, log_path)
+    return 0
 
 
 def run_odp_socket_smoke(args) -> None:

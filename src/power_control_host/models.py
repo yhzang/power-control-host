@@ -28,6 +28,26 @@ class TelemetrySample:
 
 
 @dataclass(slots=True)
+class ChannelCycleSpec:
+    channel: str
+    on_seconds: float
+    off_seconds: float
+    cycles: int
+    voltage: float | None = None
+    current: float | None = None
+
+
+@dataclass(slots=True)
+class RelativeChannelSpec:
+    channel: str
+    reference_channel: str | None = None
+    on_delay_seconds: float = 0.0
+    off_advance_seconds: float = 0.0
+    voltage: float | None = None
+    current: float | None = None
+
+
+@dataclass(slots=True)
 class SequenceStep:
     device_id: str
     channel: str

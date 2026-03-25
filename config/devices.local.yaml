@@ -20,6 +20,7 @@ devices:
       read_termination: "\n"
     logical_channels:
       - CH1
+      - CH2
     notes: >
       当前先只联调 1 台 ODP。若 socket 命令稳定后，再把第二台 ODP
       或 PSW 逐步加回配置。

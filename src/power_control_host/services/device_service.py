@@ -29,6 +29,9 @@ class DeviceService:
                 return device
         raise ValueError(f"未找到设备: {device_id}")
 
+    def get_logical_channels(self, device_id: str) -> list[str]:
+        return list(self.get_device(device_id).config.logical_channels)
+
     def identify_all(self) -> list[DeviceIdentity]:
         results: list[DeviceIdentity] = []
         for device in self.devices:

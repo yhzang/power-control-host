@@ -19,6 +19,7 @@ devices:
       read_termination: "\n"
     logical_channels:
       - CH1
+      - CH2
     notes: >
       ODP 当前优先按 socket 方式示例。最终以现场实测 IP、端口和返回格式为准。
   - id: psw_01
@@ -48,3 +49,4 @@ devices:
   #     read_termination: "\n"
   #   logical_channels:
   #     - CH1
+  #     - CH2
