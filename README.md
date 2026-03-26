@@ -256,6 +256,7 @@ python -m pytest -q
 
 - [`manual-tests/README.md`](manual-tests/README.md)
 - [`manual-tests/odp_socket_probe.ipynb`](manual-tests/odp_socket_probe.ipynb)
+- [`manual-tests/odp_sequence_manual.ipynb`](manual-tests/odp_sequence_manual.ipynb)
 
 ## 当前目录重点映射
 
@@ -287,5 +288,6 @@ python -m pytest -q
 3. [`config/devices.local.yaml`](config/devices.local.yaml)
 4. [`manual-tests/README.md`](manual-tests/README.md)
 5. [`manual-tests/odp_socket_probe.ipynb`](manual-tests/odp_socket_probe.ipynb)
-6. [`src/power_control_host/services/sequence_service.py`](src/power_control_host/services/sequence_service.py)
-7. [`src/power_control_host/ui/cli.py`](src/power_control_host/ui/cli.py)
+6. [`manual-tests/odp_sequence_manual.ipynb`](manual-tests/odp_sequence_manual.ipynb)
+7. [`src/power_control_host/services/sequence_service.py`](src/power_control_host/services/sequence_service.py)
+8. [`src/power_control_host/ui/cli.py`](src/power_control_host/ui/cli.py)
