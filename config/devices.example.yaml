@@ -26,15 +26,17 @@ devices:
     vendor: gwinstek
     model: PSW30-72
     transport:
-      type: visa
-      resource: TCPIP0::192.168.1.102::INSTR
+      type: socket
+      host: 192.168.1.x
+      port: 2268
       timeout_ms: 3000
       write_termination: "\n"
       read_termination: "\n"
     logical_channels:
       - OUT
     notes: >
-      PSW 资源地址先按常见 VISA/TCPIP 形式示例，后续以现场设备接口和识别结果为准。
+      PSW 走 LAN socket，port 2268。*IDN? 返回格式：GW-INSTEK,PSW30-72,GEW161978,02.53.20220419。
+      实际 IP 以现场设备为准，可用 scan-devices 自动发现。
   # 未来扩展到多台时，继续按下面这种模式追加即可。
   #
   # - id: odp_02

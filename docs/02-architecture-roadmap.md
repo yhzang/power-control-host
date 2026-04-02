@@ -1,243 +1,84 @@
-# 02 架构与后续路线说明
-
-## 1. 当前架构目标
-
-当前架构不是为了立刻做出完整 GUI，而是为了确保后续可以逐步扩展到：
-
-- `ODP`
-- `PSW`
-- 多设备并发
-- `1 秒采样`
-- `Excel` 导出
-- 上下电时序控制
-- 最终约 `40 台电源`
-
-所以当前代码结构强调的是“分层”和“可扩展”，而不是界面完整度。
-
-## 2. 当前分层设计
-
-### 2.1 配置层
-
-文件：
-
-- [`config/devices.local.yaml`](../config/devices.local.yaml)
-- [`config/devices.example.yaml`](../config/devices.example.yaml)
-- [`src/power_control_host/settings.py`](../src/power_control_host/settings.py)
-
-职责：
-
-- 记录设备清单
-- 记录通信方式
-- 记录通道、地址、端口、超时
-- 为后续多设备扩展保留统一入口
-
-### 2.2 传输层
-
-目录：
-
-- [`src/power_control_host/transports/`](../src/power_control_host/transports/)
-
-职责：
-
-- 管理 `socket`、`VISA`、`serial` 三类底层通信
-- 负责发送、接收、结束符和超时
-- 不关心设备业务语义
-
-这一层的目标是让不同设备、不同接口可以共存。
-
-### 2.3 设备驱动层
-
-目录：
-
-- [`src/power_control_host/devices/`](../src/power_control_host/devices/)
-
-职责：
-
-- 把底层通信封装成设备命令
-- 把 `ODP` 和 `PSW` 的差异隔离开
-- 对上层暴露统一动作，例如：
-  - 设电压
-  - 设电流
-  - 开输出
-  - 关输出
-  - 读测量值
-
-### 2.4 业务层
-
-目录：
-
-- [`src/power_control_host/services/`](../src/power_control_host/services/)
-
-职责：
-
-- 组织多个设备动作
-- 组织采样逻辑
-- 组织导出逻辑
-- 组织时序逻辑
-
-后续真正“像上位机”的逻辑，主要会落在这一层。
-
-### 2.5 入口层
-
-目录：
-
-- [`src/power_control_host/ui/`](../src/power_control_host/ui/)
-- [`manual-tests/`](../manual-tests/)
-
-职责：
-
-- 提供命令行联调入口
-- 提供 notebook 形式的人工联调入口
-- 在 GUI 形成前，承担最小可操作入口的角色
-
-## 3. 当前为什么这样拆
-
-这样拆的原因，是为了避免以后出现下面这些问题时整仓库一起乱改：
-
-- `ODP` 用 `socket`，`PSW` 用 `VISA`
-- 某个品牌命令格式变了
-- 某个设备换了接口
-- 多设备并发后要加重试
-- 时序控制要和采样逻辑并行
-
-如果提前把层拆开，后面改动会更可控：
-
-- 改通信问题，优先改 `transports`
-- 改命令问题，优先改 `devices`
-- 改业务流程，优先改 `services`
-- 改联调入口，优先改 `ui` 或 `manual-tests`
-
-## 4. 面向 40 台设备的提前设计
-
-虽然当前只做 `1 台 ODP`，但后续如果目标是 `40 台电源`，现在就要提前考虑这些边界：
-
-### 4.1 设备清单必须配置化
-
-不能把设备地址写死在代码里。  
-后续应继续沿用 `devices` 列表方式，通过配置增加设备。
-
-### 4.2 不同品牌要允许不同通信方式
-
-不能假设所有设备都走同一种接口。
-
-当前已知就有这种趋势：
-
-- `ODP`：当前按 `socket`
-- `PSW`：当前预留 `VISA`
-
-所以“设备层”和“传输层”必须分开。
-
-### 4.3 多设备并发要先考虑超时和隔离
-
-当设备数从 `1 台` 扩到 `40 台` 时，重点问题不再是命令格式，而是：
-
-- 某一台超时是否拖死全局
-- 某一台断开是否影响全部采样
-- 某一条命令失败是否影响时序执行
-
-后续业务层必须围绕“隔离、重试、超时控制”来设计。
-
-### 4.4 采样和控制要解耦
-
-后续会同时存在：
-
-- 输出控制
-- 周期采样
-- Excel 导出
-- 时序调度
-
-这些流程如果写在一起，后期会非常难维护。  
-所以当前先把 `services` 分出来，是为后续拆分采样与控制逻辑做准备。
-
-## 5. 后续阶段路线
-
-### 阶段 1：把单台 ODP 最基础通信跑稳
-
-重点：
-
-- `*IDN?`
-- `INST CH1`
-- `VOLT`
-- `CURR`
-- `OUTP`
-- `MEAS`
-
-产出：
-
-- 确认当前 `ODP` 命令链是否成立
-- 校正 [`src/power_control_host/devices/odp.py`](../src/power_control_host/devices/odp.py)
-
-### 阶段 2：把 ODP 驱动收口
-
-重点：
-
-- 根据真实返回校正命令格式
-- 校正返回值解析
-- 校正通道选择逻辑
-
-产出：
-
-- 可稳定工作的 `ODP` 驱动
-
-### 阶段 3：补回 PSW
-
-重点：
-
-- 确认 `PSW` 现场通信方式
-- 补齐 `PSW` 最小命令集
-- 与 `ODP` 同时共存
-
-产出：
-
-- 双品牌设备可共存的最小系统
-
-### 阶段 4：补业务能力
-
-重点：
-
-- 多设备轮询
-- `1 秒采样`
-- `Excel` 导出
-- 基础异常处理
-
-产出：
-
-- 第一版可用系统
-
-### 阶段 5：补时序与循环控制
-
-重点：
-
-- 相对延时
-- 后上先下
-- 循环过程中的时序执行
-
-产出：
-
-- 满足需求文档新增时序功能的版本
-
-### 阶段 6：扩到多设备与长期稳定性
-
-重点：
-
-- 多设备并发
-- 长时间运行
-- 超时重试
-- 异常隔离
-
-产出：
-
-- 面向 `40 台` 的稳定性版本
-
-## 6. 当前版本的定位
-
-当前版本不是最终产品版，而是“主版本基线”。
-
-它的作用是：
-
-- 固定目录结构
-- 固定分层边界
-- 固定当前 `ODP socket` 这一条主线
-- 为另一台电脑同步测试提供统一起点
-
-后续继续开发时，应尽量围绕这套分层往前推进，而不是重新把配置、通信、驱动和业务逻辑揉在一起。
+# 02 架构与后续路线
+
+## 1. 分层设计
+
+| 层 | 目录 | 职责 |
+|---|---|---|
+| 配置层 | `config/` + `settings.py` | 设备清单、地址、端口、通道、超时 |
+| 传输层 | `transports/` | socket / VISA / serial 底层收发，不关心业务语义 |
+| 设备驱动层 | `devices/` | 把传输封装成设备命令，隔离 ODP / PSW 差异 |
+| 业务层 | `services/` | 时序编译与执行、采样、导出 |
+| 入口层 | `ui/` + `manual-tests/` | CLI 和 notebook 联调入口 |
+| 发现层 | `discovery.py` | 局域网设备扫描，按端口和 IDN 自动识别类型 |
+
+分层的目的是改一处不影响其他层：
+- 改通信问题 → `transports/`
+- 改命令格式 → `devices/`
+- 改业务流程 → `services/`
+- 改扫描逻辑 → `discovery.py`
+- 改 CLI → `ui/cli.py`
+
+## 2. 当前已完成的阶段
+
+### 阶段 1-2：ODP 通信验证与驱动收口
+- socket 通信链路确认
+- 所有基础命令验证（VOLT / CURR / OUTP / MEAS）
+- MEAS:CURR? 返回格式按状态块解析
+
+### 阶段 3：PSW 接入
+- 确认 PSW 走 LAN socket，port 2268
+- `psw.py` 驱动完整实现
+- 确认 4 种 cycle 命令对 PSW 直接可用（service 层对设备类型无感知）
+
+### 阶段 4-5：业务能力与时序控制
+- 4 种 cycle 入口全部实现：`run-cycle` / `run-parallel-cycle` / `run-relative-cycle` / `run-staggered-cycle`
+- 动作事件日志（CSV）
+- 自动化回归测试
+
+### 阶段 5.5：设备自动发现（2026-03-31）
+- `discovery.py`：并发探测 192.168.1.1-254，ODP port 4196 / PSW port 2268
+- 自动识别设备类型，推断 ID 和通道
+- `scan-devices --emit-yaml` 输出可直接粘贴的 YAML 配置
+
+## 3. 下一阶段：40 台设备接入
+
+### 3.1 步骤
+1. `scan-devices --emit-yaml` 生成全部设备配置
+2. 逐台 `probe-idn` 确认连通
+3. PSW 现场 cycle 验证（命令已就绪）
+4. 配齐 `devices.local.yaml`，覆盖所有 40 台
+
+### 3.2 扩展到 40 台的关键边界
+
+**设备清单配置化**
+不把地址写死在代码里，全部通过 `devices.local.yaml` 管理。
+
+**多设备并发超时隔离**
+某台超时或断开不能拖死全局，业务层需围绕隔离、重试、超时控制来设计。
+
+**采样与控制解耦**
+后续会同时存在输出控制、周期采样、时序调度，这三条流程不能写在一起。`services/` 已提前拆分，继续沿用。
+
+## 4. 后续待做
+
+| 能力 | 状态 |
+|---|---|
+| PSW 现场 cycle 验证 | 待做（命令已就绪） |
+| 40 台设备全部接入配置 | 待做 |
+| 多设备并发执行 | 待做 |
+| 1 秒周期采样 | 待做 |
+| Excel 导出 | 待做 |
+| GUI | 待做 |
+
+## 5. 文件索引
+
+| 需要改什么 | 找哪个文件 |
+|---|---|
+| 设备地址 / 端口 / 通道 | `config/devices.local.yaml` |
+| ODP 命令解析 | `src/power_control_host/devices/odp.py` |
+| PSW 命令解析 | `src/power_control_host/devices/psw.py` |
+| 设备自动扫描 | `src/power_control_host/discovery.py` |
+| 时序编译与执行 | `src/power_control_host/services/sequence_service.py` |
+| CLI 入口 | `src/power_control_host/ui/cli.py` |
+| channel-spec 解析 | `src/power_control_host/ui/cli_parsing.py` |
+| 自动化测试 | `tests/` |

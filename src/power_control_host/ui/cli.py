@@ -16,6 +16,7 @@ from power_control_host.transports.visa_transport import (
     list_visa_resources,
     probe_visa_resource,
 )
+from power_control_host.discovery import devices_to_yaml, scan_subnet
 from power_control_host.ui.cli_parsing import (
     parse_parallel_channel_specs,
     parse_relative_channel_specs,
@@ -74,6 +75,33 @@ def main() -> int:
     odp_smoke_parser.add_argument("--output-on", action="store_true", help="Turn output on.")
     odp_smoke_parser.add_argument("--measure", action="store_true", help="Read measurement.")
     odp_smoke_parser.add_argument("--output-off", action="store_true", help="Turn output off at the end.")
+
+    scan_parser = subparsers.add_parser(
+        "scan-devices",
+        help="Scan subnet for ODP and PSW devices via *IDN? and print results.",
+    )
+    scan_parser.add_argument(
+        "--subnet",
+        default="192.168.1",
+        help="Subnet prefix to scan, e.g. 192.168.1",
+    )
+    scan_parser.add_argument(
+        "--timeout-ms",
+        type=int,
+        default=1000,
+        help="Per-probe socket timeout in milliseconds.",
+    )
+    scan_parser.add_argument(
+        "--workers",
+        type=int,
+        default=100,
+        help="Concurrent worker threads.",
+    )
+    scan_parser.add_argument(
+        "--emit-yaml",
+        action="store_true",
+        help="Also print a devices.yaml snippet for the discovered devices.",
+    )
 
     probe_parser = subparsers.add_parser("probe-idn", help="Query *IDN? from one configured device.")
     probe_parser.add_argument("--device", required=True, help="Configured device id.")
@@ -236,6 +264,20 @@ def main() -> int:
 
         if args.command == "odp-socket-smoke":
             run_odp_socket_smoke(args)
+            return 0
+
+        if args.command == "scan-devices":
+            print(f"Scanning {args.subnet}.1-254 (timeout={args.timeout_ms}ms, workers={args.workers}) ...")
+            devices = scan_subnet(args.subnet, timeout_ms=args.timeout_ms, workers=args.workers)
+            if not devices:
+                print("No devices found.")
+                return 0
+            print(f"Found {len(devices)} device(s):")
+            for d in devices:
+                print(f"  {d.suggested_id}  {d.host}:{d.port}  {d.idn}")
+            if args.emit_yaml:
+                print("\n--- yaml snippet ---")
+                print(devices_to_yaml(devices))
             return 0
 
         app = create_app(Path(args.config))

@@ -69,9 +69,27 @@
    - 两个通道的开关顺序
    - `runtime/sequence_logs/` 下生成的 CSV
 
-## 后续扩展
+### 3. 设备扫描与批量连通确认
 
-如果后面补回 `PSW` 或多设备联调，可以继续在这个目录下新增：
+打开 [`device_scan_manual.ipynb`](device_scan_manual.ipynb)：
 
-- `psw_visa_probe.ipynb`
-- `multi_device_smoke.ipynb`
+1. 改参数单元里的 `SUBNET`（默认 `192.168.1`）
+2. 运行 import 单元确认路径正常
+3. 运行扫描单元，确认扫出预期的 ODP / PSW 设备
+4. 运行逐台 *IDN? 单元，确认每台设备响应正常
+5. 运行统计单元，核对 ODP / PSW 台数
+6. 运行 YAML 单元，把输出粘进 `config/devices.local.yaml`
+
+## 与 tests/ 的区别
+
+`tests/` 是自动化回归测试，用 mock 跑，不需要设备在线，`pytest` 一条命令验证逻辑。
+`manual-tests/` 需要真实设备，手动块状执行，看设备面板和实际返回值。两者验证的层面不同，不重合。
+
+## 当前文件
+
+| 文件 | 用途 |
+|---|---|
+| `odp_socket_probe.ipynb` | ODP 底层 SCPI 命令逐条确认 |
+| `odp_sequence_manual.ipynb` | ODP 四种 cycle 时序联调 |
+| `psw_sequence_manual.ipynb` | PSW 四种 cycle 时序联调（单通道 OUT） |
+| `device_scan_manual.ipynb` | 局域网扫描 + 批量连通确认 + 生成 YAML 配置 |
