@@ -14,3 +14,4 @@ runtime/
 *.pyo
 *.pyd
 .ipynb_checkpoints/
+.claude/
