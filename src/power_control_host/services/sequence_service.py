@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import threading
 import time
 from dataclasses import asdict, dataclass
 from datetime import datetime
@@ -9,10 +10,12 @@ from pathlib import Path
 from power_control_host.devices.base import PowerSupplyDevice
 from power_control_host.models import (
     ChannelCycleSpec,
+    MultiDeviceTimingSpec,
     RelativeChannelSpec,
     SequenceExecutionEvent,
     SequencePlan,
     SequenceStep,
+    TimingNode,
 )
 from power_control_host.services.device_service import DeviceService
 
@@ -47,6 +50,7 @@ class SequenceService:
         self.device_service = device_service
         self.runtime_dir = runtime_dir
         self.sleep_fn = sleep_fn
+        self._cancel_flag = threading.Event()
 
     def build_simple_startup_plan(self) -> SequencePlan:
         return SequencePlan(
@@ -213,6 +217,158 @@ class SequenceService:
             name=f"{device_id}_{lead_channel}_{lag_channel}_staggered_{cycles}",
         )
 
+    # ------------------------------------------------------------------
+    # 多设备时序构建器
+    # ------------------------------------------------------------------
+
+    def build_multi_device_timing_plan(
+        self,
+        *,
+        spec: MultiDeviceTimingSpec,
+        name: str | None = None,
+    ) -> SequencePlan:
+        """从多设备时序配置构建执行计划。
+
+        核心逻辑：
+        1. 过滤出 enabled=True 的节点并验证。
+        2. 自动计算或使用指定的周期时长。
+        3. 为每个节点生成 setpoint + on/off 动作。
+        4. 复用 _build_plan_from_actions() 完成排序和 wait 插入。
+        5. 按 cycles 次数重复整个周期。
+
+        Args:
+            spec: 多设备时序配置对象。
+            name: 可选的计划名称，默认由 spec.name 生成。
+
+        Returns:
+            可传入 execute_plan() 或 execute_plan_with_pool() 的 SequencePlan。
+
+        Raises:
+            ValueError: 节点列表为空、设备/通道不存在、时序参数非法。
+        """
+        enabled_nodes = [node for node in spec.nodes if node.enabled]
+        if not enabled_nodes:
+            raise ValueError("MultiDeviceTimingSpec 中没有任何 enabled=True 的节点")
+        if spec.cycles <= 0:
+            raise ValueError("cycles 必须大于 0")
+
+        normalized = self._normalize_timing_nodes(enabled_nodes)
+
+        max_off_time = self._round_time(
+            max(node.off_time_seconds for node in normalized)
+        )
+        if spec.cycle_period_seconds < 0:
+            raise ValueError("cycle_period_seconds 必须大于或等于 0")
+
+        # 计算周期时长
+        if spec.cycle_period_seconds > 0:
+            period = self._round_time(spec.cycle_period_seconds)
+            if period < max_off_time:
+                raise ValueError(
+                    "cycle_period_seconds 必须大于或等于所有节点的最大 "
+                    f"off_time_seconds ({max_off_time})"
+                )
+        else:
+            period = max_off_time
+
+        actions: list[_ScheduledAction] = []
+
+        # setpoint 动作只在第一周期前执行一次（time_offset=0）
+        for node in normalized:
+            actions.extend(
+                self._build_setpoint_actions(
+                    node.device_id, node.channel, node.voltage, node.current
+                )
+            )
+
+        # 每个周期生成 on/off
+        for cycle_index in range(spec.cycles):
+            cycle_start = self._round_time(cycle_index * period)
+            for node in normalized:
+                actions.append(
+                    _ScheduledAction(
+                        time_offset_seconds=self._round_time(
+                            cycle_start + node.on_time_seconds
+                        ),
+                        device_id=node.device_id,
+                        channel=node.channel,
+                        action="output_on",
+                    )
+                )
+                actions.append(
+                    _ScheduledAction(
+                        time_offset_seconds=self._round_time(
+                            cycle_start + node.off_time_seconds
+                        ),
+                        device_id=node.device_id,
+                        channel=node.channel,
+                        action="output_off",
+                    )
+                )
+
+        plan_name = name or f"multi_device_{spec.name}"
+        plan_end_offset = self._round_time(spec.cycles * period)
+        return self._build_plan_from_actions(
+            plan_name, actions, plan_end_offset=plan_end_offset
+        )
+
+    def _normalize_timing_nodes(
+        self, nodes: list[TimingNode]
+    ) -> list[TimingNode]:
+        """验证和规范化 TimingNode 列表。
+
+        验证项：设备 ID 存在、on_time >= 0、off_time > on_time。
+        通道名规范化复用现有 _build_channel_map() + _resolve_channel_name()。
+
+        Args:
+            nodes: 已过滤 enabled=True 的节点列表。
+
+        Returns:
+            规范化后的节点列表（通道名已转为大写标准形式）。
+
+        Raises:
+            ValueError: 任何节点验证失败时抛出，包含失败原因。
+        """
+        channel_map_cache: dict[str, dict[str, str]] = {}
+        normalized: list[TimingNode] = []
+        seen_nodes: set[tuple[str, str]] = set()
+        for node in nodes:
+            self._validate_non_negative("on_time_seconds", node.on_time_seconds)
+            if node.off_time_seconds <= node.on_time_seconds:
+                raise ValueError(
+                    f"节点 {node.device_id}.{node.channel}: "
+                    f"off_time_seconds ({node.off_time_seconds}) "
+                    f"必须大于 on_time_seconds ({node.on_time_seconds})"
+                )
+            if node.device_id not in channel_map_cache:
+                channel_map_cache[node.device_id] = self._build_channel_map(node.device_id)
+            channel_map = channel_map_cache[node.device_id]
+            resolved_channel = self._resolve_channel_name(node.channel, channel_map)
+            key = (node.device_id, resolved_channel)
+            if key in seen_nodes:
+                raise ValueError(
+                    f"MultiDeviceTimingSpec 中存在重复节点: "
+                    f"{node.device_id}.{resolved_channel}"
+                )
+            seen_nodes.add(key)
+            normalized.append(
+                TimingNode(
+                    device_id=node.device_id,
+                    channel=resolved_channel,
+                    on_time_seconds=node.on_time_seconds,
+                    off_time_seconds=node.off_time_seconds,
+                    voltage=node.voltage,
+                    current=node.current,
+                    enabled=node.enabled,
+                    description=node.description,
+                )
+            )
+        return normalized
+
+    # ------------------------------------------------------------------
+    # 执行引擎
+    # ------------------------------------------------------------------
+
     def execute_plan(
         self,
         plan: SequencePlan,
@@ -259,6 +415,99 @@ class SequenceService:
         finally:
             if current_device is not None:
                 current_device.disconnect()
+
+        if log_path is not None:
+            self.write_event_log(events, log_path)
+
+        return events
+
+    def cancel_execution(self) -> None:
+        """发出取消信号，使正在执行的 execute_plan_with_pool() 在下一个 wait 步骤退出。
+
+        该方法线程安全，可由外部线程调用。
+        """
+        self._cancel_flag.set()
+
+    def execute_plan_with_pool(
+        self,
+        plan: SequencePlan,
+        *,
+        log_path: str | Path | None = None,
+    ) -> list[SequenceExecutionEvent]:
+        """使用连接池执行计划，支持多设备并发连接和取消。
+
+        与 execute_plan() 的区别：
+        - 预先连接计划中所有涉及的设备，避免执行中频繁断开/重连。
+        - wait 步骤分段检查取消标志（每 0.1 秒一次），响应 cancel_execution()。
+        - 退出时（含异常、取消）自动断开所有连接。
+
+        Args:
+            plan: 由 build_*() 系列方法生成的执行计划。
+            log_path: 可选的 CSV 日志路径；相对路径相对于 runtime_dir。
+
+        Returns:
+            执行事件列表，取消时最后一条事件的 action 为 "cancelled"。
+        """
+        from power_control_host.services.device_pool import DeviceConnectionPool
+
+        # 重置取消标志，确保新一轮执行干净启动
+        self._cancel_flag.clear()
+
+        device_ids = list(
+            {step.device_id for step in plan.steps if step.action != "wait"}
+        )
+
+        events: list[SequenceExecutionEvent] = []
+        pool = DeviceConnectionPool(self.device_service)
+
+        with pool.managed_connections(device_ids):
+            for index, step in enumerate(plan.steps, start=1):
+                if step.action == "wait":
+                    # 分段 sleep，每 0.1 秒检查取消标志
+                    remaining = step.delay_seconds
+                    chunk = 0.1
+                    while remaining > 0:
+                        if self._cancel_flag.is_set():
+                            events.append(
+                                self._make_event(
+                                    plan_name=plan.name,
+                                    step_index=index,
+                                    device_id=step.device_id,
+                                    channel=step.channel,
+                                    action="cancelled",
+                                    detail=f"wait_remaining={remaining:.3f}s",
+                                )
+                            )
+                            if log_path is not None:
+                                self.write_event_log(events, log_path)
+                            return events
+                        self.sleep_fn(min(chunk, remaining))
+                        remaining = self._round_time(remaining - chunk)
+
+                    events.append(
+                        self._make_event(
+                            plan_name=plan.name,
+                            step_index=index,
+                            device_id=step.device_id,
+                            channel=step.channel,
+                            action="wait",
+                            detail=f"seconds={step.delay_seconds}",
+                        )
+                    )
+                    continue
+
+                device = pool.get_device(step.device_id)
+                detail = self._execute_device_step(device, step)
+                events.append(
+                    self._make_event(
+                        plan_name=plan.name,
+                        step_index=index,
+                        device_id=step.device_id,
+                        channel=step.channel,
+                        action=step.action,
+                        detail=detail,
+                    )
+                )
 
         if log_path is not None:
             self.write_event_log(events, log_path)

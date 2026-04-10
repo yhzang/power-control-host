@@ -1,6 +1,35 @@
 # 03 变更记录
 
-## 2026-03-31
+## 2026-04-10 — 多设备时序功能
+
+### 新增文件
+
+| 文件 | 说明 |
+|---|---|
+| `src/power_control_host/services/device_pool.py` | 多设备连接池，预连接所有设备，避免时序执行中频繁断开/重连 |
+| `src/power_control_host/services/timing_config.py` | 时序配置 JSON 持久化（save / load） |
+| `tests/test_multi_device_timing.py` | 多设备时序全套单元测试（40 个）|
+
+### 修改文件
+
+| 文件 | 变更摘要 |
+|---|---|
+| `src/power_control_host/models.py` | 新增 `TimingNode`、`MultiDeviceTimingSpec` dataclass |
+| `src/power_control_host/services/sequence_service.py` | 新增 `build_multi_device_timing_plan()`、`_normalize_timing_nodes()`、`execute_plan_with_pool()`、`cancel_execution()`；`__init__` 添加 `_cancel_flag` |
+| `src/power_control_host/services/device_service.py` | 新增 `_parse_serial_number()`、`get_device_serial_number()`、`list_devices_with_serial()` |
+| `src/power_control_host/ui/cli.py` | 新增子命令 `run-multi-device-timing`；`show-devices` 命令现在显示序列号 |
+| `README.md` | 更新当前进度，添加多设备时序章节 |
+
+### 测试结果
+
+```
+61 passed in 0.69s
+```
+所有测试（含回归）全部通过。
+
+---
+
+
 
 ### 本次做了什么
 

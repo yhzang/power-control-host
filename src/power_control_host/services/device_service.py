@@ -117,3 +117,60 @@ class DeviceService:
         if device.config.logical_channels:
             return device.config.logical_channels[0]
         raise ValueError(f"设备 {device.config.id} 未配置逻辑通道，请在配置文件中补充。")
+
+    @staticmethod
+    def _parse_serial_number(idn_response: str) -> str:
+        """Extract serial number (3rd comma-delimited field) from *IDN? response.
+
+        Format: MANUFACTURER,MODEL,SERIAL,FIRMWARE
+        Example: OWON,ODP3012,24320076,FV:V3.9.0 -> '24320076'
+        """
+        parts = idn_response.strip().split(",")
+        if len(parts) >= 3:
+            return parts[2].strip()
+        return ""
+
+    def get_device_serial_number(self, device_id: str) -> str:
+        """Connect device and extract serial number from *IDN? response.
+
+        Returns device_id as fallback on failure.
+        """
+        device = self.get_device(device_id)
+        try:
+            device.connect()
+            try:
+                idn = device.identify()
+                serial = self._parse_serial_number(idn)
+                return serial if serial else device_id
+            finally:
+                device.disconnect()
+        except Exception:
+            return device_id
+
+    def list_devices_with_serial(self) -> list[dict[str, str]]:
+        """List all devices with serial numbers.
+
+        Returns list of dicts with keys: device_id, model, serial_number.
+        serial_number is 'unknown' when query fails.
+        """
+        results: list[dict[str, str]] = []
+        for device in self.devices:
+            try:
+                device.connect()
+                try:
+                    idn = device.identify()
+                    serial = self._parse_serial_number(idn)
+                    if not serial:
+                        serial = "unknown"
+                finally:
+                    device.disconnect()
+            except Exception:
+                serial = "unknown"
+            results.append(
+                {
+                    "device_id": device.config.id,
+                    "model": device.config.model,
+                    "serial_number": serial,
+                }
+            )
+        return results

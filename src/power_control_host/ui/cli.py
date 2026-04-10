@@ -34,7 +34,12 @@ def main() -> int:
     subparsers = parser.add_subparsers(dest="command", required=True)
     subparsers.add_parser("show-plan", help="Show the current development checklist.")
     subparsers.add_parser("check-config", help="Validate config and print a summary.")
-    subparsers.add_parser("show-devices", help="Print configured devices.")
+    show_devices_parser = subparsers.add_parser("show-devices", help="Print configured devices.")
+    show_devices_parser.add_argument(
+        "--with-serial",
+        action="store_true",
+        help="Connect each device and query its serial number (slower).",
+    )
     subparsers.add_parser(
         "list-visa-resources",
         help="List VISA resources currently visible on this computer.",
@@ -217,6 +222,20 @@ def main() -> int:
         help="Optional CSV log path. Defaults to runtime/sequence_logs/<timestamp>.csv",
     )
 
+    multi_device_parser = subparsers.add_parser(
+        "run-multi-device-timing",
+        help="Run multi-device timing sequence from a JSON config file.",
+    )
+    multi_device_parser.add_argument(
+        "--config-file",
+        required=True,
+        help="Path to timing config JSON file (MultiDeviceTimingSpec format).",
+    )
+    multi_device_parser.add_argument(
+        "--log-file",
+        help="Optional CSV log path. Defaults to runtime/sequence_logs/<timestamp>.csv",
+    )
+
     args = parser.parse_args()
 
     try:
@@ -287,8 +306,13 @@ def main() -> int:
             return 0
 
         if args.command == "show-devices":
-            for item in app.device_service.list_devices():
-                print(item)
+            if args.with_serial:
+                items = app.device_service.list_devices_with_serial()
+                for item in items:
+                    print(f"{item['device_id']} ({item['model']}) - SN: {item['serial_number']}")
+            else:
+                for item in app.device_service.list_devices():
+                    print(item)
             return 0
 
         if args.command == "probe-idn":
@@ -365,6 +389,24 @@ def main() -> int:
                 lag_current=args.lag_current,
             )
             return _execute_sequence_plan(app, plan, args.log_file)
+
+        if args.command == "run-multi-device-timing":
+            from power_control_host.services.timing_config import load_timing_config
+
+            spec = load_timing_config(args.config_file)
+            plan = app.sequence_service.build_multi_device_timing_plan(spec=spec)
+            log_path = resolve_sequence_log_path(args.log_file, plan.name)
+
+            enabled_count = sum(1 for n in spec.nodes if n.enabled)
+            device_count = len({n.device_id for n in spec.nodes if n.enabled})
+            print(f"plan: {spec.name}")
+            print(f"devices: {device_count}")
+            print(f"nodes: {enabled_count}")
+            print(f"cycles: {spec.cycles}")
+
+            events = app.sequence_service.execute_plan_with_pool(plan, log_path=log_path)
+            print_sequence_summary(plan.name, events, log_path)
+            return 0
 
         return 0
     except ValueError as exc:

@@ -7,7 +7,8 @@
 - ODP 单台控制闭环已完成（socket 通信、时序执行、动作日志、回归测试）
 - PSW 驱动已就绪，确认走 LAN socket port 2268
 - 新增 `scan-devices`，并发扫描局域网自动发现 ODP / PSW
-- 未做：多设备并发执行、1 秒采样、Excel 导出、GUI
+- **新增多设备时序功能**: 支持 40 台设备中任意组合跨设备通道时序编排
+- 未做：1 秒采样、Excel 导出、GUI
 
 本地配置：[`config/devices.local.yaml`](config/devices.local.yaml)
 
@@ -131,7 +132,59 @@ python -m pytest tests/ -q
 | PSW 命令与返回解析 | `src/power_control_host/devices/psw.py` |
 | 设备自动扫描逻辑 | `src/power_control_host/discovery.py` |
 | 时序编译与执行 | `src/power_control_host/services/sequence_service.py` |
+| 多设备连接池 | `src/power_control_host/services/device_pool.py` |
+| 多设备时序配置持久化 | `src/power_control_host/services/timing_config.py` |
 | CLI 入口 | `src/power_control_host/ui/cli.py` |
 | channel-spec 解析 | `src/power_control_host/ui/cli_parsing.py` |
 | 自动化测试 | `tests/` |
 | 手动联调 notebook | `manual-tests/` |
+
+## 多设备时序
+
+支持跨设备、跨通道的绝对时刻时序编排。每个通道指定上电时刻和下电时刻（相对周期开始），支持多循环。
+
+### 准备 JSON 配置文件
+
+```json
+{
+  "name": "7设备交错上电测试",
+  "cycles": 10,
+  "cycle_period_seconds": 60.0,
+  "nodes": [
+    {"device_id": "odp_01", "channel": "CH1", "on_time_seconds": 0.0,  "off_time_seconds": 50.0, "voltage": 12.0, "current": 1.0, "enabled": true,  "description": "主电源"},
+    {"device_id": "odp_02", "channel": "CH1", "on_time_seconds": 5.0,  "off_time_seconds": 45.0, "voltage": 5.0,  "current": 2.0, "enabled": true,  "description": "延迟5秒上电"},
+    {"device_id": "psw_01", "channel": "OUT",  "on_time_seconds": 10.0, "off_time_seconds": 40.0, "voltage": 48.0,             "enabled": true,  "description": "延迟10秒上电"}
+  ]
+}
+```
+
+`cycle_period_seconds=0` 表示自动以 `max(off_time_seconds)` 为周期。
+
+### 查看设备序列号
+
+```powershell
+# 快速查看配置（不连接设备）
+power-control-host --config config/devices.local.yaml show-devices
+
+# 连接设备查询序列号
+power-control-host --config config/devices.local.yaml show-devices --with-serial
+# 输出示例:
+# odp_01 (ODP3012) - SN: 24320076
+# odp_02 (ODP3012) - SN: 24320077
+# psw_01 (PSW30-72) - SN: GEW161978
+```
+
+### 执行多设备时序
+
+```powershell
+power-control-host --config config/devices.local.yaml run-multi-device-timing ^
+  --config-file my_timing.json
+# 默认日志写 runtime/sequence_logs/<plan_name>_<timestamp>.csv
+```
+
+指定日志路径：
+
+```powershell
+power-control-host --config config/devices.local.yaml run-multi-device-timing ^
+  --config-file my_timing.json --log-file runtime/sequence_logs/custom.csv
+```
