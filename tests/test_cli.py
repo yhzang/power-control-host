@@ -148,3 +148,47 @@ def test_run_staggered_cycle_cli_keeps_backward_compatible_entrypoint(monkeypatc
 
     output = capsys.readouterr().out
     assert "plan_name: staggered_plan" in output
+
+
+def test_scan_devices_cli_passes_custom_ports(monkeypatch, capsys) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_scan_subnet(subnet: str, **kwargs):
+        captured["subnet"] = subnet
+        captured.update(kwargs)
+        return []
+
+    monkeypatch.setattr(cli, "scan_subnet", fake_scan_subnet)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "power-control-host",
+            "scan-devices",
+            "--subnet",
+            "192.168.10",
+            "--timeout-ms",
+            "1500",
+            "--workers",
+            "8",
+            "--odp-port",
+            "5001",
+            "--psw-port",
+            "5002",
+        ],
+    )
+
+    result = cli.main()
+
+    assert result == 0
+    assert captured == {
+        "subnet": "192.168.10",
+        "timeout_ms": 1500,
+        "workers": 8,
+        "odp_port": 5001,
+        "psw_port": 5002,
+    }
+
+    output = capsys.readouterr().out
+    assert "ODP port=5001" in output
+    assert "PSW port=5002" in output

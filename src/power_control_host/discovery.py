@@ -26,13 +26,15 @@ def scan_subnet(
     *,
     timeout_ms: int = 1000,
     workers: int = 100,
+    odp_port: int = ODP_PORT,
+    psw_port: int = PSW_PORT,
 ) -> list[DiscoveredDevice]:
     """Scan all .1–.254 addresses in subnet for ODP and PSW devices."""
     probes: list[tuple[str, int]] = []
     for last in range(1, 255):
         host = f"{subnet}.{last}"
-        probes.append((host, ODP_PORT))
-        probes.append((host, PSW_PORT))
+        probes.append((host, odp_port))
+        probes.append((host, psw_port))
 
     found: list[DiscoveredDevice] = []
     odp_counter: dict[str, int] = {}
@@ -45,7 +47,15 @@ def scan_subnet(
             idn = future.result()
             if idn is None:
                 continue
-            device = _parse_idn(host, port, idn, odp_counter, psw_counter)
+            device = _parse_idn(
+                host,
+                port,
+                idn,
+                odp_counter,
+                psw_counter,
+                odp_port=odp_port,
+                psw_port=psw_port,
+            )
             if device is not None:
                 found.append(device)
 
@@ -82,6 +92,9 @@ def _parse_idn(
     idn: str,
     odp_counter: dict[str, int],
     psw_counter: dict[str, int],
+    *,
+    odp_port: int = ODP_PORT,
+    psw_port: int = PSW_PORT,
 ) -> DiscoveredDevice | None:
     parts = [p.strip() for p in idn.split(",")]
     if len(parts) < 2:
@@ -90,7 +103,7 @@ def _parse_idn(
     vendor_str = parts[0].upper()
     model = parts[1] if len(parts) > 1 else "UNKNOWN"
 
-    if "OWON" in vendor_str and port == ODP_PORT:
+    if "OWON" in vendor_str and port == odp_port:
         n = odp_counter.get(model, 0) + 1
         odp_counter[model] = n
         suggested_id = f"odp_{n:02d}"
@@ -106,7 +119,7 @@ def _parse_idn(
         )
 
     if "GW-INSTEK" in vendor_str or "GWINSTEK" in vendor_str:
-        if port == PSW_PORT:
+        if port == psw_port:
             n = psw_counter.get(model, 0) + 1
             psw_counter[model] = n
             suggested_id = f"psw_{n:02d}"
@@ -137,14 +150,14 @@ def devices_to_yaml(devices: list[DiscoveredDevice]) -> str:
         lines.append(f"  - id: {d.suggested_id}")
         lines.append(f"    vendor: {d.vendor}")
         lines.append(f"    model: {d.model}")
-        lines.append(f"    transport:")
-        lines.append(f"      type: socket")
+        lines.append("    transport:")
+        lines.append("      type: socket")
         lines.append(f"      host: {d.host}")
         lines.append(f"      port: {d.port}")
-        lines.append(f"      timeout_ms: 3000")
-        lines.append(f"      write_termination: \"\\n\"")
-        lines.append(f"      read_termination: \"\\n\"")
-        lines.append(f"    logical_channels:")
+        lines.append("      timeout_ms: 3000")
+        lines.append("      write_termination: \"\\n\"")
+        lines.append("      read_termination: \"\\n\"")
+        lines.append("    logical_channels:")
         for ch in d.suggested_channels:
             lines.append(f"      - {ch}")
         lines.append(f"    notes: \"auto-discovered from {d.host}:{d.port} | IDN: {d.idn}\"")

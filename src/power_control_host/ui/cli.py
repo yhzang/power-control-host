@@ -103,6 +103,18 @@ def main() -> int:
         help="Concurrent worker threads.",
     )
     scan_parser.add_argument(
+        "--odp-port",
+        type=int,
+        default=4196,
+        help="ODP socket port to scan.",
+    )
+    scan_parser.add_argument(
+        "--psw-port",
+        type=int,
+        default=2268,
+        help="PSW socket port to scan.",
+    )
+    scan_parser.add_argument(
         "--emit-yaml",
         action="store_true",
         help="Also print a devices.yaml snippet for the discovered devices.",
@@ -286,8 +298,18 @@ def main() -> int:
             return 0
 
         if args.command == "scan-devices":
-            print(f"Scanning {args.subnet}.1-254 (timeout={args.timeout_ms}ms, workers={args.workers}) ...")
-            devices = scan_subnet(args.subnet, timeout_ms=args.timeout_ms, workers=args.workers)
+            print(
+                f"Scanning {args.subnet}.1-254 "
+                f"(ODP port={args.odp_port}, PSW port={args.psw_port}, "
+                f"timeout={args.timeout_ms}ms, workers={args.workers}) ..."
+            )
+            devices = scan_subnet(
+                args.subnet,
+                timeout_ms=args.timeout_ms,
+                workers=args.workers,
+                odp_port=args.odp_port,
+                psw_port=args.psw_port,
+            )
             if not devices:
                 print("No devices found.")
                 return 0
